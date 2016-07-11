@@ -60,9 +60,9 @@ class S3_Uploads_WP_CLI_Command extends WP_CLI_Command {
 	public function migrate_attachments_to_s3( $args, $args_assoc ) {
 
 		$attachments = new WP_Query( array(
-			'post_type' => 'attachment',
+			'post_type'      => 'attachment',
 			'posts_per_page' => -1,
-			'post_status' => 'all'
+			'post_status'    => 'all',
 		));
 
 		WP_CLI::line( sprintf( 'Attempting to move %d attachments to S3', $attachments->found_posts ) );
@@ -127,7 +127,6 @@ class S3_Uploads_WP_CLI_Command extends WP_CLI_Command {
 					WP_CLI::success( sprintf( 'Moved file %s to S3', $file ) );
 
 				}
-
 			} else {
 				WP_CLI::line( sprintf( 'Already moved to %s S3', $file ) );
 			}
@@ -139,10 +138,13 @@ class S3_Uploads_WP_CLI_Command extends WP_CLI_Command {
 	 * Create an AWS IAM user for S3 Uploads to user
 	 *
 	 * @subcommand create-iam-user
-	 * @synopsis --admin-key=<key> --admin-secret=<secret> [--username=<username>]
+	 * @synopsis --admin-key=<key> --admin-secret=<secret> [--username=<username>] [--format=<format>]
 	 */
 	public function create_iam_user( $args, $args_assoc ) {
 
+		$args_assoc = wp_parse_args( $args_assoc, array(
+			'format' => 'table',
+		) );
 		if ( empty( $args_assoc['username'] ) ) {
 			$username = 's3-uploads-' . sanitize_title( home_url() );
 		} else {
@@ -153,28 +155,26 @@ class S3_Uploads_WP_CLI_Command extends WP_CLI_Command {
 			$iam = Aws\Common\Aws::factory( array( 'key' => $args_assoc['admin-key'], 'secret' => $args_assoc['admin-secret'] ) )->get( 'iam' );
 
 			$iam->createUser( array(
-				'UserName' => $username
+				'UserName' => $username,
 			));
 
 			$credentials = $iam->createAccessKey( array(
-				'UserName' => $username
+				'UserName' => $username,
 			));
 
 			$credentials = $credentials['AccessKey'];
 
 			$iam->putUserPolicy( array(
-				'UserName' => $username,
-				'PolicyName' => $username . '-policy',
-				'PolicyDocument' => $this->get_iam_policy()
+				'UserName'       => $username,
+				'PolicyName'     => $username . '-policy',
+				'PolicyDocument' => $this->get_iam_policy(),
 			));
 
-		} catch( Exception $e ) {
+		} catch ( Exception $e ) {
 			WP_CLI::error( $e->getMessage() );
 		}
 
-		WP_CLI::success( sprintf( 'Created new IAM user %s. The Access Credentials are displayed below', $username ) );
-
-		WP_CLI\Utils\format_items( 'table', array( (object) $credentials ), array( 'AccessKeyId', 'SecretAccessKey' ) );
+		WP_CLI\Utils\format_items( $args_assoc['format'], array( (object) $credentials ), array( 'AccessKeyId', 'SecretAccessKey' ) );
 
 	}
 
@@ -187,7 +187,6 @@ class S3_Uploads_WP_CLI_Command extends WP_CLI_Command {
 		if ( strpos( S3_UPLOADS_BUCKET, '/' ) ) {
 			$path = str_replace( strtok( S3_UPLOADS_BUCKET, '/' ) . '/', '', S3_UPLOADS_BUCKET );
 		}
-
 
 		return '{
   "Version": "2012-10-17",
@@ -261,12 +260,12 @@ class S3_Uploads_WP_CLI_Command extends WP_CLI_Command {
 		try {
 			$objects = $s3->getIterator('ListObjects', array(
 				'Bucket' => strtok( S3_UPLOADS_BUCKET, '/' ),
-				'Prefix' => $prefix
+				'Prefix' => $prefix,
 			));
-			foreach ($objects as $object) {
+			foreach ( $objects as $object ) {
 				WP_CLI::line( str_replace( $prefix, '', $object['Key'] ) );
 			}
-		} catch( Exception $e ) {
+		} catch ( Exception $e ) {
 			WP_CLI::error( $e->getMessage() );
 		}
 
@@ -319,14 +318,14 @@ class S3_Uploads_WP_CLI_Command extends WP_CLI_Command {
 				$bucket,
 				$prefix . $to,
 				array(
-					'debug' => true,
-					'params' => array( 'ACL' => 'public-read' ),
-					'builder' => new S3_Uploads_UploadSyncBuilder( ! empty( $args_assoc['dry-run'] ) ),
-					'force' => empty( $args_assoc['sync'] ),
-					'concurrency' => ! empty( $args_assoc['concurrency'] ) ? $args_assoc['concurrency'] : 5
-					)
-				);
-		} catch( Exception $e ) {
+					'debug'       => true,
+					'params'      => array( 'ACL' => 'public-read' ),
+					'builder'     => new S3_Uploads_UploadSyncBuilder( ! empty( $args_assoc['dry-run'] ) ),
+					'force'       => empty( $args_assoc['sync'] ),
+					'concurrency' => ! empty( $args_assoc['concurrency'] ) ? $args_assoc['concurrency'] : 5,
+				)
+			);
+		} catch ( Exception $e ) {
 			WP_CLI::error( $e->getMessage() );
 		}
 	}
@@ -350,7 +349,6 @@ class S3_Uploads_WP_CLI_Command extends WP_CLI_Command {
 		if ( isset( $args[0] ) ) {
 			$prefix .= ltrim( $args[0], '/' );
 
-
 			if ( strpos( $args[0], '.' ) === false ) {
 				$prefix = trailingslashit( $prefix );
 			}
@@ -361,12 +359,15 @@ class S3_Uploads_WP_CLI_Command extends WP_CLI_Command {
 				strtok( S3_UPLOADS_BUCKET, '/' ),
 				$prefix,
 				$regex,
-				array( 'before_delete', function() {
-					WP_CLI::line( sprintf( 'Deleting file' ) );
-				})
+				array(
+					'before_delete',
+					function() {
+						WP_CLI::line( sprintf( 'Deleting file' ) );
+					},
+				)
 			);
 
-		} catch( Exception $e ) {
+		} catch ( Exception $e ) {
 			WP_CLI::error( $e->getMessage() );
 		}
 
@@ -391,21 +392,20 @@ class S3_Uploads_WP_CLI_Command extends WP_CLI_Command {
 		WP_CLI::success( 'Media URL rewriting disabled.' );
 	}
 
-	private function recurse_copy($src,$dst) {
-		$dir = opendir($src);
-		@mkdir($dst);
-		while(false !== ( $file = readdir($dir)) ) {
-			if (( $file != '.' ) && ( $file != '..' )) {
-				if ( is_dir($src . '/' . $file) ) {
-					$this->recurse_copy($src . '/' . $file,$dst . '/' . $file);
-				}
-				else {
+	private function recurse_copy( $src, $dst ) {
+		$dir = opendir( $src );
+		@mkdir( $dst );
+		while ( false !== ( $file = readdir( $dir ) ) ) {
+			if ( ( '.' !== $file ) && ( '..' !== $file ) ) {
+				if ( is_dir( $src . '/' . $file ) ) {
+					$this->recurse_copy( $src . '/' . $file,$dst . '/' . $file );
+				} else {
 					WP_CLI::line( sprintf( 'Copying from %s to %s', $src . '/' . $file, $dst . '/' . $file ) );
-					copy($src . '/' . $file,$dst . '/' . $file);
+					copy( $src . '/' . $file,$dst . '/' . $file );
 				}
 			}
 		}
-		closedir($dir);
+		closedir( $dir );
 	}
 
 	/**

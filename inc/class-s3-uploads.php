@@ -17,13 +17,13 @@ class S3_Uploads {
 	public static function get_instance() {
 
 		if ( ! self::$instance ) {
-
-			$key    = defined( 'S3_UPLOADS_KEY' ) ? S3_UPLOADS_KEY : null;
-			$secret = defined( 'S3_UPLOADS_SECRET' ) ? S3_UPLOADS_SECRET : null;
-			$url    = defined( 'S3_UPLOADS_BUCKET_URL' ) ? S3_UPLOADS_BUCKET_URL : null;
-			$region = defined( 'S3_UPLOADS_REGION' ) ? S3_UPLOADS_REGION : null;
-
-			self::$instance = new S3_Uploads( S3_UPLOADS_BUCKET, $key, $secret, $url, $region );
+			self::$instance = new S3_Uploads(
+				S3_UPLOADS_BUCKET,
+				defined( 'S3_UPLOADS_KEY' ) ? S3_UPLOADS_KEY : null,
+				defined( 'S3_UPLOADS_SECRET' ) ? S3_UPLOADS_SECRET : null,
+				defined( 'S3_UPLOADS_BUCKET_URL' ) ? S3_UPLOADS_BUCKET_URL : null,
+				S3_UPLOADS_REGION
+			);
 		}
 
 		return self::$instance;
@@ -46,6 +46,7 @@ class S3_Uploads {
 
 		add_filter( 'upload_dir', array( $this, 'filter_upload_dir' ) );
 		add_filter( 'wp_image_editors', array( $this, 'filter_editors' ), 9 );
+		add_filter( 'wp_delete_file', array( $this, 'wp_filter_delete_file' ) );
 		remove_filter( 'admin_notices', 'wpthumb_errors' );
 
 		add_action( 'wp_handle_sideload_prefilter', array( $this, 'filter_sideload_move_temp_file_to_s3' ) );
@@ -60,6 +61,7 @@ class S3_Uploads {
 		remove_filter( 'upload_dir', array( $this, 'filter_upload_dir' ) );
 		remove_filter( 'wp_image_editors', array( $this, 'filter_editors' ), 9 );
 		remove_filter( 'wp_handle_sideload_prefilter', array( $this, 'filter_sideload_move_temp_file_to_s3' ) );
+		remove_filter( 'wp_delete_file', array( $this, 'wp_filter_delete_file' ) );
 	}
 
 	/**
@@ -69,7 +71,7 @@ class S3_Uploads {
 		if ( defined( 'S3_UPLOADS_USE_LOCAL' ) && S3_UPLOADS_USE_LOCAL ) {
 			stream_wrapper_register( 's3', 'S3_Uploads_Local_Stream_Wrapper', STREAM_IS_URL );
 		} else {
-			S3_Uploads_Stream_Wrapper::register_streamwrapper( $this );
+			S3_Uploads_Stream_Wrapper::register( $this->s3() );
 			stream_context_set_option( stream_context_get_default(), 's3', 'ACL', 'public-read' );
 		}
 
@@ -98,6 +100,22 @@ class S3_Uploads {
 		return $dirs;
 	}
 
+	/**
+	 * When WordPress removes files, it's expecting to do so on
+	 * absolute file paths, as such it breaks when using uris for
+	 * file paths (such as s3://...). We have to filter the file_path
+	 * to only return the relative section, to play nice with WordPress
+	 * handling.
+	 *
+	 * @param  string $file_path
+	 * @return string
+	 */
+	public function wp_filter_delete_file( $file_path ) {
+		$dir = wp_upload_dir();
+
+		return str_replace( trailingslashit( $dir['basedir'] ), '', $file_path );
+	}
+
 	public function get_s3_url() {
 		if ( $this->bucket_url ) {
 			return $this->bucket_url;
@@ -109,10 +127,24 @@ class S3_Uploads {
 		return apply_filters( 's3_uploads_bucket_url', 'https://' . $bucket . '.s3.amazonaws.com' . $path );
 	}
 
+	/**
+	 * Get the S3 bucket name
+	 *
+	 * @return string
+	 */
+	public function get_s3_bucket() {
+		return $bucket = strtok( $this->bucket, '/' );
+	}
+
+	public function get_s3_bucket_region() {
+		return $this->region;
+	}
+
 	public function get_original_upload_dir() {
 
-		if ( empty( $this->original_upload_dir ) )
+		if ( empty( $this->original_upload_dir ) ) {
 			wp_upload_dir();
+		}
 
 		return $this->original_upload_dir;
 	}
@@ -122,14 +154,15 @@ class S3_Uploads {
 	 */
 	public function s3() {
 
-		if ( ! empty( $this->s3 ) )
+		if ( ! empty( $this->s3 ) ) {
 			return $this->s3;
+		}
 
-		$params = array();
+		$params = array( 'version' => 'latest' );
 
 		if ( $this->key && $this->secret ) {
-			$params['key'] = $this->key;
-			$params['secret'] = $this->secret;
+			$params['credentials']['key'] = $this->key;
+			$params['credentials']['secret'] = $this->secret;
 		}
 
 		if ( $this->region ) {
@@ -149,8 +182,7 @@ class S3_Uploads {
 		}
 
 		$params = apply_filters( 's3_uploads_s3_client_params', $params );
-
-		$this->s3 = Aws\Common\Aws::factory( $params )->get( 's3' );
+		$this->s3 = Aws\S3\S3Client::factory( $params );
 
 		return $this->s3;
 	}
